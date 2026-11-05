@@ -4,27 +4,24 @@ build_place.py -- собирает итоговый файл места VolcanoD
 
     1) читает исходный hh.rbxl (двоичный) и достаёт модели дронов автора;
     2) разворачивает их в полётную ориентацию и кладёт в ServerStorage;
-    3) генерирует арену «Лавовый каньон» (tools/arena.py);
-    4) зашивает скрипты из src/ (сервер, клиент, HUD, конфиг);
-    5) настраивает освещение, атмосферу и небо;
+    3) генерирует четыре карты (tools/maps.py) в ServerStorage.Maps;
+    4) зашивает скрипты из src/;
+    5) настраивает свет, атмосферу и небо;
     6) пишет XML-плейс, который открывается в Roblox Studio.
 
 Запуск:  python3 tools/build_place.py
 """
 
 import os
-import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rbxlx as X
-from rbxlx import (CF, C3, Content, Inst, NumRange, UDim2, Vec2, Vec3, cf, cf_angles,
-                   cylinder, rgb, ENUMS)
+from rbxlx import (CF, C3, Content, Inst, Vec3, cf, rgb, ENUMS)
 
-import arena
+import maps as M
 import drone_import
-import volcano_map as M
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "src")
@@ -32,9 +29,6 @@ OUT = os.path.join(ROOT, "VolcanoDrone.rbxlx")
 SOURCE_PLACE = os.path.join(ROOT, "hh.rbxl")
 
 
-# --------------------------------------------------------------------------- #
-# помощники
-# --------------------------------------------------------------------------- #
 def read_src(*parts):
     with open(os.path.join(SRC, *parts), "r", encoding="utf-8") as fh:
         return fh.read()
@@ -44,9 +38,9 @@ def script(cls, name, path):
     return Inst(cls, name, Source=read_src(*path))
 
 
-# --------------------------------------------------------------------------- #
-# освещение / атмосфера
-# --------------------------------------------------------------------------- #
+CLIENT_MODULES = ["DroneUI", "MenuUI", "Effects", "FpsWeapon", "Builder"]
+
+
 def build_lighting():
     lighting = Inst(
         "Lighting", "Lighting",
@@ -84,113 +78,89 @@ def build_lighting():
         MoonTextureId=Content("rbxassetid://6444320592"),
         SkyboxOrientation=Vec3(0, 0, 0),
     )
-
-    atmosphere = Inst(
-        "Atmosphere", "Atmosphere",
-        Density=0.44,
-        Offset=0.12,
-        Color=rgb(255, 152, 104),
-        Decay=rgb(118, 54, 38),
-        Glare=0.45,
-        Haze=1.7,
+    atmosphere = Inst("Atmosphere", "Atmosphere", Density=0.44, Offset=0.12,
+                      Color=rgb(255, 152, 104), Decay=rgb(118, 54, 38), Glare=0.45,
+                      Haze=1.7)
+    lighting.add(
+        sky, atmosphere,
+        Inst("BloomEffect", "Bloom", Intensity=1.35, Size=28.0, Threshold=1.05, Enabled=True),
+        Inst("SunRaysEffect", "SunRays", Intensity=0.12, Spread=0.72, Enabled=True),
+        Inst("DepthOfFieldEffect", "DepthOfField", FarIntensity=0.08, FocusDistance=90.0,
+             InFocusRadius=260.0, NearIntensity=0.0, Enabled=False),
+        Inst("ColorCorrectionEffect", "ColorCorrection", Brightness=0.03, Contrast=0.14,
+             Saturation=0.2, TintColor=rgb(255, 224, 200), Enabled=True),
     )
-
-    bloom = Inst("BloomEffect", "Bloom", Intensity=1.35, Size=28.0, Threshold=1.05,
-                 Enabled=True)
-    sunrays = Inst("SunRaysEffect", "SunRays", Intensity=0.12, Spread=0.72, Enabled=True)
-    dof = Inst("DepthOfFieldEffect", "DepthOfField", FarIntensity=0.08,
-               FocusDistance=90.0, InFocusRadius=260.0, NearIntensity=0.0, Enabled=False)
-    cce = Inst("ColorCorrectionEffect", "ColorCorrection", Brightness=0.03,
-               Contrast=0.14, Saturation=0.2, TintColor=rgb(255, 224, 200),
-               Enabled=True)
-
-    lighting.add(sky, atmosphere, bloom, sunrays, dof, cce)
     return lighting
 
 
-# --------------------------------------------------------------------------- #
-# сборка
-# --------------------------------------------------------------------------- #
 def build():
     if not os.path.exists(SOURCE_PLACE):
         raise SystemExit("Не найден hh.rbxl рядом с tools/")
 
     print("[1/6] читаю исходный hh.rbxl ...")
     models = drone_import.load_source(SOURCE_PLACE)
-    print("      модели в Workspace:", ", ".join(models.keys()) or "(нет)")
 
-    # ---------------------------------------------------------------- дроны
     print("[2/6] импортирую модели дронов ...")
     server_storage = Inst("ServerStorage", "ServerStorage")
-    drone_names = []
     for name in ("Беспилотник", "скинБеспилотник"):
         if name not in models:
-            print("      ! модель", name, "не найдена, пропускаю")
+            print("      ! модель", name, "не найдена")
             continue
         model, info = drone_import.import_model(models[name], name=name)
         server_storage.add(model)
-        drone_names.append(name)
         print("      %-18s деталей: %3d  габариты: %.1f x %.1f x %.1f" % (
             name, len(model.children), *info["size"]))
 
-    if not drone_names:
-        raise SystemExit("В файле не нашлось моделей дронов")
+    print("[3/6] строю четыре карты ...")
+    maps_folder = Inst("Folder", "Maps")
+    server_storage.add(maps_folder)
+    for builder in (M.build_lava, M.build_desert, M.build_ice, M.build_space):
+        model = builder()
+        maps_folder.add(model)
+        count = sum(1 for _ in model.walk())
+        print("      %-8s объектов: %d" % (model.name, count))
 
-    # ---------------------------------------------------------------- арена
-    print("[3/6] строю арену ...")
-    map_root, gameplay = arena.build_arena()
-    part_count = sum(1 for _ in map_root.walk()) + sum(1 for _ in gameplay.walk())
-    print("      объектов в арене:", part_count)
-
-    # ---------------------------------------------------------------- скрипты
     print("[4/6] вшиваю скрипты ...")
     replicated = Inst("ReplicatedStorage", "ReplicatedStorage")
-    replicated.add(script("ModuleScript", "DroneConfig",
-                          ("ReplicatedStorage", "DroneConfig.luau")))
+    replicated.add(
+        script("ModuleScript", "DroneConfig", ("ReplicatedStorage", "DroneConfig.luau")),
+        script("ModuleScript", "GameData", ("ReplicatedStorage", "GameData.luau")),
+    )
 
     server_scripts = Inst("ServerScriptService", "ServerScriptService")
     server_scripts.add(script("Script", "DroneServer",
                               ("ServerScriptService", "DroneServer.server.luau")))
 
-    starter_scripts = Inst("Folder", "StarterPlayerScripts")
+    # ВАЖНО: именно класс StarterPlayerScripts, иначе клиентские скрипты не запускаются
+    starter_scripts = Inst("StarterPlayerScripts", "StarterPlayerScripts")
     starter_scripts.add(
         script("LocalScript", "DroneClient",
                ("StarterPlayer", "StarterPlayerScripts", "DroneClient.client.luau")))
-    starter_scripts.add(
-        script("ModuleScript", "DroneUI",
-               ("StarterPlayer", "StarterPlayerScripts", "DroneUI.luau")))
+    for name in CLIENT_MODULES:
+        starter_scripts.add(
+            script("ModuleScript", name,
+                   ("StarterPlayer", "StarterPlayerScripts", name + ".luau")))
 
     starter_player = Inst("StarterPlayer", "StarterPlayer")
-    starter_player.add(starter_scripts, Inst("Folder", "StarterCharacterScripts"))
+    starter_player.add(starter_scripts,
+                       Inst("StarterCharacterScripts", "StarterCharacterScripts"))
 
-    # ---------------------------------------------------------------- workspace
     print("[5/6] собираю сервисы ...")
-    workspace = Inst(
-        "Workspace", "Workspace",
-        Gravity=196.2,
-        FallenPartsDestroyHeight=-420.0,
-        StreamingEnabled=False,
-    )
-    camera = Inst(
-        "Camera", "Camera",
-        CFrame=cf((150, 190, 330), -12, 152, 0),
-        FieldOfView=74.0,
-        CameraType=ENUMS["CameraType"]["Scriptable"],
-    )
-    workspace.add(camera, Inst("Terrain", "Terrain"), map_root, gameplay)
+    workspace = Inst("Workspace", "Workspace", Gravity=196.2,
+                     FallenPartsDestroyHeight=-900.0, StreamingEnabled=False)
+    camera = Inst("Camera", "Camera", CFrame=cf((220, 200, 420), -14, 148, 0),
+                  FieldOfView=76.0, CameraType=ENUMS["CameraType"]["Scriptable"])
+    workspace.add(camera, Inst("Terrain", "Terrain"))
 
     players = Inst("Players", "Players", CharacterAutoLoads=False)
-    lighting = build_lighting()
-    starter_gui = Inst("StarterGui", "StarterGui")
-    roots = [workspace, lighting, replicated, server_storage, server_scripts,
-             starter_player, starter_gui, players]
+    roots = [workspace, build_lighting(), replicated, server_storage, server_scripts,
+             starter_player, Inst("StarterGui", "StarterGui"), players]
 
-    # ---------------------------------------------------------------- запись
     print("[6/6] записываю", os.path.basename(OUT), "...")
     size = X.save(roots, OUT)
-    total_instances = sum(1 for r in roots for _ in r.walk())
-    print("      готово: %s (%.1f КБ, %d объектов)" % (
-        os.path.basename(OUT), size / 1024.0, total_instances))
+    total = sum(1 for r in roots for _ in r.walk())
+    print("      готово: %s (%.1f МБ, %d объектов)" % (
+        os.path.basename(OUT), size / 1024.0 / 1024.0, total))
     return OUT
 
 

@@ -131,30 +131,6 @@ def build_arena(seed=20260101):
     for i, (x, y, z) in enumerate(pad_spots):
         M.spawn_pad(spawn_pads, (x, y, z), name="DroneSpawn%d" % (i + 1))
 
-    # ------------------------------------------------------------- таблички
-    sign_defs = [
-        ((0, 8, 62), "ЛАВОВЫЙ КАНЬОН\nДРОНЫ-ПЕРЕХВАТЧИКИ", (0, 0, 0)),
-        ((-58, 6, -40), "ОСТОРОЖНО:\nЛАВА!", (0, 0, 0)),
-        ((58, 6, -40), "VOLCANO\nOBBY", (0, 0, 0)),
-        ((0, 20, -118), "К ЗАМКУ", (0, 0, 0)),
-        ((-120, 12, 120), "ВОЛНЫ\nБЕСПИЛОТНИКОВ", (0, 0, 0)),
-        ((130, 12, 90), "НЕ ПАДАЙ", (0, 0, 0)),
-    ]
-    for i, (pos, text, _) in enumerate(sign_defs):
-        yaw = face_yaw(-pos[0], -pos[2]) if (pos[0] or pos[2]) else 0.0
-        board = M.surface_sign("Sign%d" % (i + 1), (26, 11, 1.6),
-                              (pos[0], pos[1], pos[2]), (0, yaw, 0), text,
-                              font="Cartoon", canvas=(520, 260))
-        # столбы
-        for s in (-1, 1):
-            off = Vec3(math.cos(math.radians(yaw + 90)) * s * 10, 0,
-                       math.sin(math.radians(yaw + 90)) * s * 10)
-            board.add(M.part("SignPost", (1.6, 10, 1.6),
-                            (pos[0] + off.x, pos[1] - 9.5, pos[2] + off.z),
-                            rot=(0, yaw, 0), color=M.WOOD, material="Wood",
-                            cancollide=False))
-        signs.add(board)
-
     # ------------------------------------------------------------- маяки по краю
     for i, ang in enumerate((10, 100, 190, 280)):
         dist = 400
